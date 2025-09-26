@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Loader2, CheckCircle } from 'lucide-react';
+import Link from 'next/link';
+import { Upload, Loader2, CheckCircle, FileText } from 'lucide-react';
 
 export default function Home() {
   const router = useRouter();
@@ -10,6 +11,25 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string>('');
+  const [hasExistingHosts, setHasExistingHosts] = useState(false);
+
+  useEffect(() => {
+    // Check if there are existing hosts
+    const checkExistingHosts = async () => {
+      try {
+        const response = await fetch('/api/hosts');
+        if (response.ok) {
+          const data = await response.json();
+          setHasExistingHosts(data.hosts && data.hosts.length > 0);
+        }
+      } catch (err) {
+        // Silently fail - not critical
+        console.error('Failed to check existing hosts:', err);
+      }
+    };
+
+    checkExistingHosts();
+  }, []);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -125,12 +145,25 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">
-          Censys Data Summarization Agent
-        </h1>
-        <p className="text-lg text-gray-600 mb-8">
-          Upload Censys host data to generate AI-powered security summaries
-        </p>
+        <div className="flex justify-between items-start mb-8">
+          <div>
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">
+              Censys Data Summarization Agent
+            </h1>
+            <p className="text-lg text-gray-600">
+              Upload Censys host data to generate AI-powered security summaries
+            </p>
+          </div>
+          {hasExistingHosts && (
+            <Link
+              href="/hosts"
+              className="flex items-center space-x-2 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
+            >
+              <FileText className="h-4 w-4" />
+              <span>View Previous Analysis</span>
+            </Link>
+          )}
+        </div>
 
         <div className="bg-white rounded-lg shadow-lg p-8">
           <div

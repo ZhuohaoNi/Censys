@@ -32,51 +32,206 @@ export async function generateSummary(
   const userPrompt = generateUserPrompt(host, features);
   
   try {
-    // First attempt
-    const response = await openai.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt }
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.3,
-      max_tokens: 1000,
-    });
-    
-    const content = response.choices[0].message.content;
-    if (!content) throw new Error('Empty response from OpenAI');
-    
-    try {
-      const parsed = JSON.parse(content);
-      return SummarySchema.parse(parsed);
-    } catch (parseError) {
-      // Retry with error feedback
-      console.error('First parse attempt failed:', parseError);
-      
-      const retryResponse = await openai.chat.completions.create({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-          { role: 'assistant', content: content },
-          { role: 'user', content: `Invalid JSON. Error: ${parseError}. Return valid JSON only matching the schema.` }
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.3,
-        max_tokens: 1000,
-      });
-      
-      const retryContent = retryResponse.choices[0].message.content;
-      if (!retryContent) throw new Error('Empty retry response from OpenAI');
-      
-      const retryParsed = JSON.parse(retryContent);
-      return SummarySchema.parse(retryParsed);
+    // Use Responses API for GPT-5 models, Chat Completions for others
+    if (MODEL.startsWith('gpt-5')) {
+      return await generateSummaryWithResponsesAPI(userPrompt);
+    } else {
+      return await generateSummaryWithChatAPI(userPrompt);
     }
   } catch (error) {
     console.error('OpenAI API error:', error);
     // Fallback to template-based summary
     return generateTemplateSummary(host, features);
+  }
+}
+
+/**
+ * Attempt to fix truncated JSON responses
+ */
+function attemptJSONFix(truncatedJson: string): string {
+  try {
+    // Try to complete basic JSON structure
+    let fixed = truncatedJson.trim();
+    
+    // If it ends with a key but no value, remove the key
+    if (fixed.endsWith('":')) {
+      const lastCommaIndex = fixed.lastIndexOf(',');
+      if (lastCommaIndex !== -1) {
+        fixed = fixed.substring(0, lastCommaIndex);
+      }
+    }
+    
+    // Count open braces/brackets to add closing ones
+    const openBraces = (fixed.match(/\{/g) || []).length;
+    const closeBraces = (fixed.match(/\}/g) || []).length;
+    const openBrackets = (fixed.match(/\[/g) || []).length;
+    const closeBrackets = (fixed.match(/\]/g) || []).length;
+    
+    // Add missing closing brackets and braces
+    for (let i = 0; i < openBrackets - closeBrackets; i++) {
+      fixed += ']';
+    }
+    for (let i = 0; i < openBraces - closeBraces; i++) {
+      fixed += '}';
+    }
+    
+    return fixed;
+  } catch (error) {
+    console.error('Failed to fix JSON:', error);
+    return truncatedJson;
+  }
+}
+
+/**
+ * Generate summary using the new Responses API (for GPT-5 models)
+ */
+async function generateSummaryWithResponsesAPI(userPrompt: string): Promise<Summary> {
+  // Check if Responses API is available
+  if (!openai.responses) {
+    console.warn('Responses API not available, falling back to Chat Completions API');
+    return generateSummaryWithChatAPI(userPrompt);
+  }
+
+  try {
+    // First attempt with structured output
+    const response = await openai.responses.create({
+      model: MODEL,
+      input: `${SYSTEM_PROMPT}\n\n${userPrompt}\n\nIMPORTANT: You must return complete, valid JSON. End your response with proper closing braces and brackets.`,
+      max_output_tokens: 1500, // Increased token limit
+      text: {
+        format: { type: "json_object" }
+      },
+      reasoning: { effort: "medium" }
+    });
+
+    // Extract the text content from the response
+    let outputText: string | null = null;
+    
+    // Handle different response formats
+    if (response.output_text) {
+      outputText = response.output_text;
+    } else if (response.output && response.output.length > 0) {
+      const firstOutput = response.output[0];
+      if (firstOutput.type === 'message' && firstOutput.content && firstOutput.content.length > 0) {
+        const textContent = firstOutput.content.find(c => c.type === 'output_text');
+        if (textContent && 'text' in textContent) {
+          outputText = textContent.text;
+        }
+      }
+    }
+
+    if (!outputText) {
+      throw new Error('No output text found in Responses API response');
+    }
+
+    // Validate that we have complete JSON before parsing
+    if (!outputText.trim().endsWith('}')) {
+      console.warn('JSON appears to be truncated, attempting to fix:', outputText);
+      outputText = attemptJSONFix(outputText);
+    }
+
+    try {
+      const parsed = JSON.parse(outputText);
+      return SummarySchema.parse(parsed);
+    } catch (parseError) {
+      console.error('First parse attempt failed:', parseError, 'Raw output:', outputText);
+      
+      // Retry with error feedback using the Responses API
+      const retryInput = `${SYSTEM_PROMPT}\n\n${userPrompt}\n\nPrevious response was invalid JSON: ${outputText}\n\nError: ${parseError}\n\nReturn valid JSON only matching the schema.`;
+      
+      const retryResponse = await openai.responses.create({
+        model: MODEL,
+        input: retryInput + "\n\nIMPORTANT: Return ONLY complete, valid JSON. Ensure all braces and brackets are closed.",
+        max_output_tokens: 1500, // Increased token limit
+        text: {
+          format: { type: "json_object" }
+        },
+        reasoning: { effort: "low" }
+      });
+
+      let retryOutputText: string | null = null;
+      
+      if (retryResponse.output_text) {
+        retryOutputText = retryResponse.output_text;
+      } else if (retryResponse.output && retryResponse.output.length > 0) {
+        const firstOutput = retryResponse.output[0];
+        if (firstOutput.type === 'message' && firstOutput.content && firstOutput.content.length > 0) {
+          const textContent = firstOutput.content.find(c => c.type === 'output_text');
+          if (textContent && 'text' in textContent) {
+            retryOutputText = textContent.text;
+          }
+        }
+      }
+
+      if (!retryOutputText) {
+        throw new Error('No output text in retry Responses API response');
+      }
+
+      const retryParsed = JSON.parse(retryOutputText);
+      return SummarySchema.parse(retryParsed);
+    }
+  } catch (error) {
+    console.error('Responses API failed, falling back to Chat Completions:', error);
+    return generateSummaryWithChatAPI(userPrompt);
+  }
+}
+
+/**
+ * Generate summary using Chat Completions API (for GPT-4 models)
+ */
+async function generateSummaryWithChatAPI(userPrompt: string): Promise<Summary> {
+  const response = await openai.chat.completions.create({
+    model: MODEL,
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT + "\n\nIMPORTANT: You must return complete, valid JSON. End your response with proper closing braces and brackets." },
+      { role: 'user', content: userPrompt }
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.3,
+    max_tokens: 1500, // Increased token limit
+  });
+  
+  const content = response.choices[0].message.content;
+  if (!content) throw new Error('Empty response from OpenAI');
+  
+  // Validate and fix JSON if needed
+  let fixedContent = content.trim();
+  if (!fixedContent.endsWith('}')) {
+    console.warn('Chat API JSON appears truncated, attempting to fix:', fixedContent);
+    fixedContent = attemptJSONFix(fixedContent);
+  }
+  
+  try {
+    const parsed = JSON.parse(fixedContent);
+    return SummarySchema.parse(parsed);
+  } catch (parseError) {
+    // Retry with error feedback
+    console.error('First parse attempt failed:', parseError);
+    
+    const retryResponse = await openai.chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT + "\n\nIMPORTANT: Return ONLY complete, valid JSON. Ensure all braces and brackets are closed." },
+        { role: 'user', content: userPrompt },
+        { role: 'assistant', content: fixedContent },
+        { role: 'user', content: `Invalid JSON. Error: ${parseError}. Return valid JSON only matching the schema. Make sure to complete all arrays and objects properly.` }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.3,
+      max_tokens: 1500, // Increased token limit
+    });
+    
+    const retryContent = retryResponse.choices[0].message.content;
+    if (!retryContent) throw new Error('Empty retry response from OpenAI');
+    
+    // Fix retry content if needed
+    let fixedRetryContent = retryContent.trim();
+    if (!fixedRetryContent.endsWith('}')) {
+      fixedRetryContent = attemptJSONFix(fixedRetryContent);
+    }
+    
+    const retryParsed = JSON.parse(fixedRetryContent);
+    return SummarySchema.parse(retryParsed);
   }
 }
 

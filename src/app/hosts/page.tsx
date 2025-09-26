@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronRight, AlertCircle, Download, FileText } from 'lucide-react';
+import { ChevronRight, AlertCircle, Download, FileText, Trash2 } from 'lucide-react';
 import { getRiskColorClass } from '@/lib/utils';
 
 interface HostListItem {
@@ -22,6 +22,7 @@ export default function HostsPage() {
   const [hosts, setHosts] = useState<HostListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchHosts();
@@ -37,6 +38,55 @@ export default function HostsPage() {
       setHosts(data.hosts);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load hosts');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDelete = async (hostId: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent row click navigation
+    
+    if (!confirm('Are you sure you want to delete this host?')) {
+      return;
+    }
+
+    setDeletingId(hostId);
+    try {
+      const response = await fetch(`/api/system/cache?id=${hostId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete host');
+      }
+
+      // Remove the host from the local state
+      setHosts(hosts.filter(host => host.id !== hostId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete host');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (!confirm('Are you sure you want to delete ALL analyzed hosts? This action cannot be undone.')) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/system/cache', {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to clear cache');
+      }
+
+      setHosts([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear all hosts');
     } finally {
       setIsLoading(false);
     }
@@ -72,12 +122,22 @@ export default function HostsPage() {
             <h1 className="text-3xl font-bold text-gray-900">Analyzed Hosts</h1>
             <p className="text-gray-600 mt-1">{hosts.length} hosts analyzed</p>
           </div>
-          <Link
-            href="/"
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Analyze More
-          </Link>
+          <div className="flex space-x-2">
+            {hosts.length > 0 && (
+              <button
+                onClick={handleClearAll}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Clear All
+              </button>
+            )}
+            <Link
+              href="/"
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Analyze More
+            </Link>
+          </div>
         </div>
 
         {hosts.length === 0 ? (
@@ -114,8 +174,8 @@ export default function HostsPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Summary
                   </th>
-                  <th className="relative px-6 py-3">
-                    <span className="sr-only">Actions</span>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
                   </th>
                 </tr>
               </thead>
@@ -154,8 +214,22 @@ export default function HostsPage() {
                         <span className="text-gray-400">Not generated</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <ChevronRight className="h-5 w-5 text-gray-400" />
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={(e) => handleDelete(host.id, e)}
+                          disabled={deletingId === host.id}
+                          className="text-red-600 hover:text-red-900 disabled:opacity-50 disabled:cursor-not-allowed p-1 rounded transition-colors"
+                          title="Delete host"
+                        >
+                          {deletingId === host.id ? (
+                            <div className="h-4 w-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </button>
+                        <ChevronRight className="h-5 w-5 text-gray-400" />
+                      </div>
                     </td>
                   </tr>
                 ))}

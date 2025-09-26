@@ -1,23 +1,84 @@
 # Censys Data Summarization Agent
 
-An AI-powered security analysis tool for Censys host data that provides intelligent risk assessment and actionable insights.
+> TL;DR 
+> Ingest Censys host JSON -> engineer security features -> compute a deterministic weighted risk score (0–100) -> optionally generate an AI (gpt-5-mini) human-readable summary per host. File-based ephemeral cache.
+
+Quick Start
+1. Clone & install
+   ```bash
+   git clone https://github.com/ZhuohaoNi/Censys.git
+   cd Censys
+   npm install
+   ```
+2. Configure environment
+   ```bash
+   cp .env.example .env.local
+   # then edit .env.local
+   OPENAI_API_KEY=sk-your-key
+   OPENAI_MODEL=gpt-5-mini  
+   OPENAI_FALLBACK_MODEL=gpt-4o-mini 
+   ```
+3. Run
+   ```bash
+   npm run dev
+   ```
+4. Open http://localhost:3000 and upload `docs/hosts_dataset.json`.
+
+Why this matters (Value Proposition)
+- Rapid host security triage: converts raw scan data into actionable, weighted risk signals.
+- Deterministic scoring + explainable weighting increases trust vs opaque LLM output.
+- AI summaries accelerate human consumption while retaining a fallback template path for resilience.
+- Zero external persistence: safer for sensitive test data (only transient file cache under `.cache/`).
+
+Key Features (Implemented)
+- Feature engineering: ports, CVEs (with severity & KEV flag), malware indicators, cert trust issues.
+- Weighted risk scoring (capped factors) -> risk level classification.
+- Per-host AI summary (gpt-5-mini) with automatic JSON schema validation & retry; fallback templated summary if model fails.
+- Export (JSON + Markdown) and simple system/health endpoints.
+- File-based TTL cache (default 1h) for idempotent summarization and analysis reuse.
+
+Assignment Coverage (Checklist)
+- Run Instructions: ✔ (Quick Start above)
+- Assumptions: ✔ (see Assumptions section)
+- Testing Instructions: ✔ (Manual Testing section)
+- Brief AI Techniques: ✔ (AI Techniques section)
+- Future Enhancements: ✔ (Concise list below)
+
+Risk Score Formula (Assumption)
+```
+score = min(
+  10 * criticalCVEs          (cap 40) +
+  (hasMalware ? 25 : 0)       +
+  (hasKEV ? min(8 * criticalCVEs, 24) : 0) +
+  2 * adminPortsExposed       (cap 8)  +
+  3 * selfSignedCerts         (cap 6)  +
+  (sshOnNonStandardPort ? 5 : 0),
+  100
+)
+```
+
+---
+
+A security analysis tool for Censys host data that provides risk assessment and insights using AI-powered summaries.
 
 ## Features
 
 - **Host Data Analysis**: Upload and analyze Censys JSON host data
-- **Risk Scoring**: Advanced 0-100 risk scoring algorithm based on multiple factors
-- **AI Summarization**: Generate executive summaries using OpenAI's GPT-4o-mini model
-- **Interactive UI**: Modern web interface for viewing and managing host analyses
+- **Risk Scoring**: Multi-factor risk assessment with weighted scoring
+- **Observability stack**
+- **Web Interface**: View and manage host analyses
 - **Export Options**: Export analyzed data in JSON or Markdown format
+- **Error Recovery**: JSON parsing with automatic retry mechanisms
 
 ## Tech Stack
 
-- **Framework**: Next.js 14 with App Router
+- **Framework**: Next.js 14 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS
-- **Validation**: Zod schemas
-- **AI**: OpenAI API (gpt-4o-mini)
-- **Architecture**: Unified frontend/backend with Next.js Route Handlers
+- **Validation**: Zod schemas (runtime type safety)
+- **AI**: Feature engineering (ports/CVEs/KEV/malware/certs) + explainable capped risk scoring + multi-model summaries (gpt-5-mini primary, gpt-4o-mini + template fallback) + schema‑validated structured output & retry/recovery
+- **Architecture**: Unified frontend/backend via Route Handlers
+- **Caching**: File-based TTL cache (1h, ephemeral)
 
 ## 📚 Documentation
 
@@ -33,14 +94,14 @@ Complete documentation is available in the [`docs/`](./docs/) folder:
 ### Prerequisites
 
 - Node.js 18+ and npm
-- OpenAI API key
+- OpenAI API key (for AI-powered summaries)
 
 ### Installation
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd censys-data-summarization-agent
+git clone https://github.com/ZhuohaoNi/Censys.git
+cd Censys
 ```
 
 2. Install dependencies:
@@ -51,6 +112,10 @@ npm install
 3. Create `.env.local` file:
 ```bash
 OPENAI_API_KEY=your_openai_api_key_here
+# Optional: Configure OpenAI settings
+OPENAI_MODEL=gpt-5-mini # or gpt-4o-mini
+OPENAI_TIMEOUT=30000
+OPENAI_MAX_RETRIES=3
 ```
 
 4. Run the development server:
@@ -117,23 +182,85 @@ Request: { hostIds: string[], format: 'json' | 'markdown' }
 Response: File download
 ```
 
-## Risk Scoring Algorithm
+## AI Techniques and Implementation
 
-The risk scoring system uses a 0-100 scale based on:
+This project implements several AI and ML techniques:
 
-| Factor | Weight | Criteria |
-|--------|--------|----------|
-| Open Ports | 20% | Critical ports (22, 3389, etc.) |
-| Vulnerabilities | 30% | CVE severity and CVSS scores |
-| Service Exposure | 20% | Number and type of services |
-| Software Versions | 15% | Outdated or vulnerable versions |
-| Network Location | 15% | Geographic and AS risk factors |
+### 1. Feature Engineering Pipeline
+**Location**: `src/lib/feature-engineering.ts`
 
-### Risk Levels
-- **Critical** (76-100): Immediate action required
-- **High** (51-75): Significant vulnerabilities present
-- **Medium** (26-50): Some concerns identified
-- **Low** (0-25): Minimal risk detected
+- **Risk Scoring**: Transforms raw Censys data into engineered features using weighted algorithms
+- **Vulnerability Analysis**: Categorizes CVEs by severity (Critical, High, Medium, Low) with specialized scoring
+- **Port Risk Assessment**: Identifies administrative and high-risk ports (SSH:22, RDP:3389, MySQL:3306, etc.)
+- **Malware Detection**: Binary classification for malware presence across services
+- **Certificate Analysis**: Evaluates SSL/TLS certificates for self-signed and trust issues
+
+### 2. Large Language Model Integration
+**Location**: `src/lib/openai.ts`
+
+#### Multi-Model Support with Fallback Strategy
+- **Primary**: gpt-5-mini (higher quality summaries)
+- **Fallback**: gpt-4o-mini if primary times out/errors
+- **Final Fallback**: Template-based summary (no external API)
+
+#### Structured Output Generation
+- **JSON Schema Validation**: Ensures consistent AI responses using Zod schemas
+- **Response Format Enforcement**: Uses OpenAI's `json_object` response format
+- **JSON Parser**: Automatically fixes truncated or malformed JSON responses
+
+
+#### Prompt Engineering
+- **System Prompts**: Specialized cybersecurity analyst persona
+- **Cybersecurity analyst persona**
+
+- **Context-Aware Prompts**: Dynamic prompt generation based on host characteristics
+function generateUserPrompt(host: Host, features: EngineeredFeatures): string
+
+- **Error Recovery**: Automatic retry with feedback loops for invalid responses
+
+### 3. Caching System
+**Location**: `src/lib/persistent-cache.ts`
+
+- **File-Based Persistence**: Maintains state across server restarts
+- **TTL Management**: Automatic expiration (1 hour default)
+
+### 4. Risk Classification Algorithm (Assumption)
+**Location**: `src/lib/feature-engineering.ts`
+
+The system uses a multi-factor risk assessment:
+
+| Factor | Weight | Implementation |
+|--------|--------|----------------|
+| Critical CVEs | 40 points max | 10 points per critical vulnerability |
+| Malware Detection | 25 points | Binary classification with immediate scoring |
+| KEV Vulnerabilities | 24 points max | 8 points per known exploited vulnerability |
+| Admin Port Exposure | 8 points max | 2 points per exposed administrative port |
+| Certificate Issues | 6 points max | 3 points per self-signed certificate |
+| Non-standard SSH | 5 points | Penalty for SSH on non-standard ports |
+
+### Risk Level Classification (Assumption)
+- **Critical** (80-100): Immediate action required - malware or multiple critical CVEs
+- **High** (50-79): Significant vulnerabilities present - critical CVEs or KEV
+- **Medium** (25-49): Some concerns identified - multiple medium/high vulnerabilities
+- **Low** (0-24): Minimal risk detected - few or no significant issues
+
+### 5. Natural Language Generation
+The AI system generates human-readable security reports with:
+
+- **Executive Overview**: Location, network context, and service purpose analysis
+- **Security Posture Assessment**: Vulnerability analysis with risk contextualization  
+- **Actionable Recommendations**: Prioritized remediation steps based on risk factors
+- **Metrics Dashboard**: Key performance indicators for security teams
+
+### 6. Assumptions Made During Development
+
+- **Data Quality**: Assumes Censys data follows documented schema structure
+- **API Availability**: OpenAI API is available; implements graceful fallback to template summaries
+- **Network Context**: ASN and geographic data is reliable for risk assessment
+- **Vulnerability Scoring**: CVSS scores when available; severity-based fallback
+- **Malware Classification**: Binary detection based on Censys malware indicators
+- **Certificate Trust**: Self-signed certificates are considered security risks
+- **Administrative Ports**: Standard ports (22, 3389, 3306, etc.) are higher risk when exposed
 
 ## Development
 
@@ -146,18 +273,40 @@ The risk scoring system uses a 0-100 scale based on:
 │   ├── host_dataset_description.md  # Data format docs
 │   └── hosts_dataset.json       # Sample test data
 ├── src/
-│   ├── app/                     # Next.js app router pages
+│   ├── app/                     # Next.js 14 App Router
 │   │   ├── api/                # API route handlers
+│   │   │   ├── analyze/        # Risk analysis endpoint
+│   │   │   ├── export/         # Data export endpoints
+│   │   │   ├── health/         # Health check endpoint
+│   │   │   ├── hosts/          # Host CRUD operations
+│   │   │   └── system/         # System utilities (cache, debug)
 │   │   ├── hosts/              # Host listing and detail pages
-│   │   └── page.tsx            # Upload page
+│   │   │   └── [id]/           # Dynamic host detail page
+│   │   ├── globals.css         # Global styles
+│   │   ├── layout.tsx          # Root layout component
+│   │   └── page.tsx            # Upload page (home)
 │   ├── schemas/                # Zod validation schemas
-│   ├── lib/                    # Utilities and core logic
-│   │   ├── persistent-cache.ts # File-based cache system
-│   │   ├── feature-engineering.ts  # Risk scoring
-│   │   └── openai.ts           # LLM integration
-│   └── __tests__/              # Test files
+│   │   ├── api.ts              # API request/response schemas
+│   │   ├── engineered-features.ts  # Risk scoring schemas
+│   │   ├── host.ts             # Host data schemas
+│   │   ├── summary.ts          # AI summary schemas
+│   │   └── index.ts            # Schema exports
+│   └── lib/                    # Core business logic
+│       ├── feature-engineering.ts  # AI risk scoring algorithms
+│       ├── openai.ts           # LLM integration & prompt engineering
+│       ├── persistent-cache.ts # File-based caching system
+│       └── utils.ts            # Utility functions
 ├── .cache/                     # Runtime cache (gitignored)
-└── README.md                   # This file
+├── .env.example                # Environment variables template
+├── .env.local                  # Local environment variables (gitignored)
+├── .gitignore                  # Git ignore rules
+├── .next/                      # Next.js build output (gitignored)
+├── next.config.js              # Next.js configuration
+├── package.json                # Dependencies and scripts
+├── postcss.config.js           # PostCSS configuration
+├── tailwind.config.js          # Tailwind CSS configuration
+├── tsconfig.json               # TypeScript configuration
+└── README.md                   
 ```
 
 ### Schema Validation
@@ -167,45 +316,57 @@ All data is validated using Zod schemas:
 - `EngineeredFeaturesSchema`: Defines risk scoring output
 - `SummarySchema`: Structures AI-generated summaries
 
-### Testing
+## Manual Testing 
 
-Run tests:
-```bash
-npm test
-```
+### Basic Functionality Tests
 
-Run type checking:
-```bash
-npm run type-check
-```
+1. **Upload Test Data**:
+   ```bash
+   # Use the provided sample dataset
+   cp docs/hosts_dataset.json test-data.json
+   ```
+   - Navigate to [http://localhost:3000](http://localhost:3000)
+   - Upload the `test-data.json` file
+   - Verify successful parsing and redirect to hosts list
 
-## Docker Support
+2. **Risk Scoring Verification**:
+   - Check that hosts are displayed with appropriate risk levels
+   - Verify risk scores are between 0-100
+   - Confirm color coding matches risk levels (red=critical, orange=high, etc.)
 
-Build and run with Docker:
+3. **AI Summary Generation**:
+   - Click on any host to view details
+   - Click "Generate AI Summary" button
+   - Verify summary contains all required sections:
+     - Overview (location, network, services)
+     - Security posture (vulnerabilities, malware)
+     - Recommendations (actionable steps)
+     - Key metrics (risk level, counts)
 
-```bash
-# Build image
-docker build -t censys-agent .
+4. **Export Functionality**:
+   - From hosts list, select multiple hosts
+   - Test JSON export - verify complete data structure
+   - Test Markdown export - verify human-readable format
 
-# Run container
-docker run -p 3000:3000 -e OPENAI_API_KEY=your_key censys-agent
-```
+5. **API Endpoint Testing**:
+   ```bash
+   # Test health endpoint
+   curl http://localhost:3000/api/health
+   
+   # Test analyze endpoint with sample data
+   curl -X POST http://localhost:3000/api/analyze \
+     -H "Content-Type: application/json" \
+     -d @docs/hosts_dataset.json
+   ```
 
-## Security Considerations
-
-- API keys are never exposed to the frontend
-- All input data is validated with Zod schemas
-- In-memory cache expires after 1 hour
-- No persistent data storage (privacy-focused)
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests and type checking
-5. Submit a pull request
-
-## License
-
-[MIT License](LICENSE)
+## Future Enhancements 
+1. Ensemble summarization & agreement scoring (quality lift; pick best of multi-model outputs).  
+   Generate 2–3 candidate summaries (e.g., gpt-5-mini + smaller local + template), score for schema validity & feature coverage, surface best + optionally show disagreements.
+2. Active learning loop (ingest user edits → update weighting / prompt hints).  
+   Capture human edits to recommendations / risk rationale; feed into prompt hint store or lightweight adapter to reduce repeat errors and hallucinations.
+3. Explainability API (/api/explain/[id]: per-factor risk contributions + evidence).  
+   Returns normalized factor weights, raw signals (e.g., critical CVE count, admin ports), and plain-language justification to improve analyst trust.
+4. Unsupervised anomaly detection (cluster/outlier hosts: rare ports, cert anomalies).  
+   Apply clustering (DBSCAN/HDBSCAN) on engineered feature vectors; flag outliers (uncommon port/service combos, unusual cert chains) for prioritized review.
+5. Domain fine-tuned lightweight model (reduced cost, higher remediation precision, fallback chain retained).  
+   LoRA/adapter fine-tune on curated security summaries to cut token cost & increase specificity; retain existing fallback chain for resilience.
