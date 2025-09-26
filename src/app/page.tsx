@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload } from 'lucide-react';
+import { Upload, Loader2, CheckCircle } from 'lucide-react';
 
 export default function Home() {
   const router = useRouter();
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string>('');
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -46,10 +47,14 @@ export default function Home() {
 
     setIsUploading(true);
     setError(null);
+    setUploadProgress('Reading file...');
 
     try {
       const text = await file.text();
+      setUploadProgress('Parsing JSON data...');
+      
       const data = JSON.parse(text);
+      setUploadProgress('Analyzing hosts and generating features...');
       
       // Call analyze API
       const response = await fetch('/api/analyze', {
@@ -66,13 +71,17 @@ export default function Home() {
       }
 
       const result = await response.json();
+      setUploadProgress('Analysis complete! Redirecting...');
       
-      // Redirect to hosts page
-      router.push('/hosts');
+      // Small delay to show completion message
+      setTimeout(() => {
+        router.push('/hosts');
+      }, 1000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to process file');
     } finally {
       setIsUploading(false);
+      setUploadProgress('');
     }
   };
 
@@ -83,7 +92,9 @@ export default function Home() {
       
       setIsUploading(true);
       setError(null);
+      setUploadProgress('Parsing clipboard data...');
 
+      setUploadProgress('Analyzing hosts and generating features...');
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: {
@@ -98,11 +109,16 @@ export default function Home() {
       }
 
       const result = await response.json();
-      router.push('/hosts');
+      setUploadProgress('Analysis complete! Redirecting...');
+      
+      setTimeout(() => {
+        router.push('/hosts');
+      }, 1000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid JSON data in clipboard');
     } finally {
       setIsUploading(false);
+      setUploadProgress('');
     }
   };
 
@@ -171,14 +187,19 @@ export default function Home() {
 
           {isUploading && (
             <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
-              <p className="text-sm text-blue-800">Processing data...</p>
+              <div className="flex items-center">
+                <Loader2 className="h-4 w-4 animate-spin text-blue-600 mr-2" />
+                <p className="text-sm text-blue-800">
+                  {uploadProgress || 'Processing data...'}
+                </p>
+              </div>
             </div>
           )}
 
           <div className="mt-6">
             <h3 className="text-sm font-medium text-gray-900 mb-2">Sample Data</h3>
             <p className="text-sm text-gray-500">
-              You can use the provided <code className="bg-gray-100 px-1 py-0.5 rounded">hosts_dataset.json</code> file 
+              You can use the provided <code className="bg-gray-100 px-1 py-0.5 rounded">docs/hosts_dataset.json</code> file 
               to test the application.
             </p>
           </div>

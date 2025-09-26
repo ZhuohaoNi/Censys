@@ -2,10 +2,15 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import { Host, EngineeredFeatures, Summary, SummarySchema } from '@/schemas';
 
-// Initialize OpenAI client - API key should be set via OPENAI_API_KEY env var
+// Initialize OpenAI client with configuration from environment variables
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  timeout: parseInt(process.env.OPENAI_TIMEOUT || '30000'),
+  maxRetries: parseInt(process.env.OPENAI_MAX_RETRIES || '3'),
 });
+
+// Configuration
+const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
 const SYSTEM_PROMPT = `You are a cybersecurity analyst API that responds ONLY in valid JSON.
 Never include explanations, markdown, or text outside the JSON structure.
@@ -29,7 +34,7 @@ export async function generateSummary(
   try {
     // First attempt
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: MODEL,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userPrompt }
@@ -50,7 +55,7 @@ export async function generateSummary(
       console.error('First parse attempt failed:', parseError);
       
       const retryResponse = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: MODEL,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userPrompt },

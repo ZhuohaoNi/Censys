@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { hostCache } from '@/lib/cache';
+import { persistentHostCache } from '@/lib/persistent-cache';
 
 export async function GET() {
   try {
     // Get all hosts from cache
-    const allHosts = hostCache.getAll();
+    const allHosts = persistentHostCache.getAll();
     
     // Transform to list format
     const hosts = allHosts.map(({ id, data }) => ({

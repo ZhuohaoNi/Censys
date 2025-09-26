@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { AnalyzeRequestSchema, AnalyzeResponseSchema, ErrorResponseSchema } from '@/schemas';
 import { engineerFeatures } from '@/lib/feature-engineering';
-import { hostCache } from '@/lib/cache';
+import { persistentHostCache } from '@/lib/persistent-cache';
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       const features = engineerFeatures(host);
       
       // Store in cache
-      hostCache.set(id, { host, features });
+      persistentHostCache.set(id, { host, features });
       
       return {
         id,

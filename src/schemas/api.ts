@@ -37,7 +37,7 @@ export const ErrorResponseSchema = z.object({
   error: z.object({
     code: z.string(),
     message: z.string(),
-    details: z.record(z.any()).optional(),
+    details: z.union([z.record(z.any()), z.array(z.any())]).optional(),
   }),
 });
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SummaryResponseSchema, ErrorResponseSchema } from '@/schemas';
-import { hostCache } from '@/lib/cache';
+import { persistentHostCache } from '@/lib/persistent-cache';
 import { generateSummary } from '@/lib/openai';
 
 export async function POST(
@@ -11,7 +11,7 @@ export async function POST(
     const { id } = params;
     
     // Get host from cache
-    const cached = hostCache.get(id);
+    const cached = persistentHostCache.get(id);
     
     if (!cached) {
       const errorResponse = ErrorResponseSchema.parse({
@@ -36,7 +36,7 @@ export async function POST(
     const summary = await generateSummary(cached.host, cached.features);
     
     // Store summary in cache
-    hostCache.setSummary(id, summary);
+    persistentHostCache.setSummary(id, summary);
     
     // Return response
     const response = SummaryResponseSchema.parse({

@@ -19,6 +19,15 @@ An AI-powered security analysis tool for Censys host data that provides intellig
 - **AI**: OpenAI API (gpt-4o-mini)
 - **Architecture**: Unified frontend/backend with Next.js Route Handlers
 
+## 📚 Documentation
+
+Complete documentation is available in the [`docs/`](./docs/) folder:
+
+- **[Assignment Brief](./docs/assignment_brief.md)** - Original project requirements
+- **[Technical Specification](./docs/SPEC.md)** - Detailed implementation specs  
+- **[Dataset Description](./docs/host_dataset_description.md)** - Data format information
+- **[Sample Dataset](./docs/hosts_dataset.json)** - Test data for the application
+
 ## Getting Started
 
 ### Prerequisites
@@ -130,17 +139,25 @@ The risk scoring system uses a 0-100 scale based on:
 
 ### Project Structure
 ```
-src/
-├── app/                 # Next.js app router pages
-│   ├── api/            # API route handlers
-│   ├── hosts/          # Host listing and detail pages
-│   └── page.tsx        # Upload page
-├── schemas/            # Zod validation schemas
-├── lib/               # Utilities and core logic
-│   ├── cache.ts       # In-memory cache
-│   ├── feature-engineering.ts  # Risk scoring
-│   └── openai.ts      # LLM integration
-└── types/             # TypeScript type definitions
+├── docs/                         # 📚 All documentation
+│   ├── README.md                # Documentation index
+│   ├── assignment_brief.md      # Project requirements
+│   ├── SPEC.md                  # Technical specifications
+│   ├── host_dataset_description.md  # Data format docs
+│   └── hosts_dataset.json       # Sample test data
+├── src/
+│   ├── app/                     # Next.js app router pages
+│   │   ├── api/                # API route handlers
+│   │   ├── hosts/              # Host listing and detail pages
+│   │   └── page.tsx            # Upload page
+│   ├── schemas/                # Zod validation schemas
+│   ├── lib/                    # Utilities and core logic
+│   │   ├── persistent-cache.ts # File-based cache system
+│   │   ├── feature-engineering.ts  # Risk scoring
+│   │   └── openai.ts           # LLM integration
+│   └── __tests__/              # Test files
+├── .cache/                     # Runtime cache (gitignored)
+└── README.md                   # This file
 ```
 
 ### Schema Validation

@@ -17,6 +17,7 @@ import {
   Check
 } from 'lucide-react';
 import { getRiskColorClass, formatDate } from '@/lib/utils';
+import { Summary } from '@/schemas';
 
 interface HostDetails {
   id: string;
@@ -42,16 +43,7 @@ interface HostDetails {
       description: string;
     }>;
   }>;
-  summary?: {
-    technical_summary: string;
-    business_impact: string;
-    security_recommendations: string[];
-    risk_assessment: {
-      overall_risk: string;
-      key_concerns: string[];
-      mitigations_required: boolean;
-    };
-  };
+  summary?: Summary;
 }
 
 export default function HostDetailPage() {
@@ -73,11 +65,45 @@ export default function HostDetailPage() {
   const fetchHostDetails = async (id: string) => {
     try {
       const response = await fetch(`/api/hosts/${id}`);
+      
       if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('Host not found. The host may have been removed or the link is invalid.');
+        }
         throw new Error('Failed to fetch host details');
       }
+      
       const data = await response.json();
-      setHost(data);
+      
+      // Check if response contains error
+      if (data.error) {
+        throw new Error(data.error.message || 'Failed to fetch host details');
+      }
+      
+      // Transform the API response to match component expectations
+      const transformedHost = {
+        id: id,
+        ip: data.host.ip,
+        location: `${data.host.location.city}, ${data.host.location.country}`,
+        as_name: data.host.autonomous_system.name,
+        as_number: data.host.autonomous_system.asn,
+        risk_level: data.features.risk_level,
+        risk_score: data.features.risk_score,
+        services: data.host.services?.map((service: any) => ({
+          port: service.port,
+          transport_protocol: service.protocol,
+          service_name: service.protocol,
+          software: service.software?.[0] ? {
+            type: service.software[0].product,
+            name: service.software[0].product,
+            version: service.software[0].version
+          } : undefined,
+          vulnerabilities: service.vulnerabilities || []
+        })) || [],
+        summary: data.summary
+      };
+      
+      setHost(transformedHost);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load host details');
     } finally {
@@ -92,22 +118,24 @@ export default function HostDetailPage() {
     setError(null);
     
     try {
-      const response = await fetch(`/api/summarize`, {
+      const response = await fetch(`/api/hosts/${host.id}/summarize`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ hostIds: [host.id] }),
       });
       
       if (!response.ok) {
-        throw new Error('Failed to generate summary');
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to generate summary');
       }
       
       const data = await response.json();
-      if (data.results && data.results.length > 0) {
-        setHost({ ...host, summary: data.results[0].summary });
+      if (data.summary) {
+        setHost({ ...host, summary: data.summary });
         setActiveTab('summary');
+      } else {
+        throw new Error('No summary returned from server');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate summary');
@@ -128,16 +156,39 @@ export default function HostDetailPage() {
     if (!host) return;
     
     try {
-      const response = await fetch(`/api/export?format=${format}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ hostIds: [host.id] }),
-      });
+      setError(null); // Clear previous errors
+      const formatParam = format === 'markdown' ? 'md' : 'json';
+      const exportUrl = `/api/export/${host.id}?format=${formatParam}`;
+      
+      console.log('Attempting export with URL:', exportUrl); // Debug log
+      
+      const response = await fetch(exportUrl);
       
       if (!response.ok) {
-        throw new Error('Failed to export data');
+        let errorMessage = `Export failed (${response.status})`;
+        
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error?.message || errorMessage;
+        } catch {
+          // If we can't parse error JSON, use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        
+        throw new Error(errorMessage);
+      }
+      
+      // Check if response is actually a file
+      const contentType = response.headers.get('content-type');
+      const contentDisposition = response.headers.get('content-disposition');
+      
+      console.log('Response headers:', { contentType, contentDisposition }); // Debug log
+      
+      if (!contentDisposition || !contentDisposition.includes('attachment')) {
+        // This might be an error response disguised as 200
+        const text = await response.text();
+        console.error('Unexpected response:', text);
+        throw new Error('Server returned unexpected response format');
       }
       
       const blob = await response.blob();
@@ -145,10 +196,16 @@ export default function HostDetailPage() {
       const a = document.createElement('a');
       a.href = url;
       a.download = `host-${host.ip.replace(/\./g, '-')}.${format === 'markdown' ? 'md' : 'json'}`;
+      document.body.appendChild(a); // Ensure element is in DOM
       a.click();
+      document.body.removeChild(a); // Clean up
       URL.revokeObjectURL(url);
+      
+      console.log('Export successful'); // Debug log
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to export data');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to export data';
+      console.error('Export error:', errorMessage, err); // Debug log
+      setError(errorMessage);
     }
   };
 
@@ -164,8 +221,36 @@ export default function HostDetailPage() {
     return (
       <div className="min-h-screen bg-gray-50 p-8">
         <div className="max-w-7xl mx-auto">
+          <Link 
+            href="/hosts"
+            className="inline-flex items-center text-blue-600 hover:text-blue-500 mb-4"
+          >
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Back to hosts
+          </Link>
           <div className="bg-red-50 border border-red-200 rounded-md p-4">
-            <p className="text-red-800">{error}</p>
+            <div className="flex">
+              <AlertCircle className="h-5 w-5 text-red-400 mr-3 mt-0.5" />
+              <div>
+                <p className="text-red-800 font-medium">Error loading host details</p>
+                <p className="text-red-700 mt-1">{error}</p>
+                <div className="mt-4">
+                  <Link
+                    href="/"
+                    className="text-blue-600 hover:text-blue-500 font-medium"
+                  >
+                    Upload new host data
+                  </Link>
+                  {' or '}
+                  <Link
+                    href="/hosts"
+                    className="text-blue-600 hover:text-blue-500 font-medium"
+                  >
+                    view all hosts
+                  </Link>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -176,9 +261,9 @@ export default function HostDetailPage() {
     return null;
   }
 
-  const vulnerabilityCount = host.services.reduce((acc, service) => 
+  const vulnerabilityCount = host.services?.reduce((acc, service) => 
     acc + (service.vulnerabilities?.length || 0), 0
-  );
+  ) || 0;
 
   return (
     <main className="min-h-screen bg-gray-50 p-8">
@@ -215,6 +300,25 @@ export default function HostDetailPage() {
             </div>
           </div>
         </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
+            <div className="flex">
+              <AlertCircle className="h-5 w-5 text-red-400 mr-3 mt-0.5" />
+              <div>
+                <p className="text-red-800 font-medium">Error</p>
+                <p className="text-red-700 mt-1">{error}</p>
+                <button
+                  onClick={() => setError(null)}
+                  className="mt-2 text-red-600 hover:text-red-500 text-sm underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Action Buttons */}
         <div className="flex gap-2 mb-6">
@@ -286,7 +390,7 @@ export default function HostDetailPage() {
                 }`}
               >
                 {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                {tab === 'services' && ` (${host.services.length})`}
+                {tab === 'services' && ` (${host.services?.length || 0})`}
                 {tab === 'vulnerabilities' && ` (${vulnerabilityCount})`}
               </button>
             ))}
@@ -322,7 +426,7 @@ export default function HostDetailPage() {
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Services</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{host.services.length} detected</dd>
+                    <dd className="mt-1 text-sm text-gray-900">{host.services?.length || 0} detected</dd>
                   </div>
                 </dl>
               </div>
@@ -332,7 +436,7 @@ export default function HostDetailPage() {
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <div className="bg-blue-50 rounded-lg p-4">
                     <Server className="h-6 w-6 text-blue-600 mb-2" />
-                    <p className="text-2xl font-bold text-gray-900">{host.services.length}</p>
+                    <p className="text-2xl font-bold text-gray-900">{host.services?.length || 0}</p>
                     <p className="text-sm text-gray-600">Active Services</p>
                   </div>
                   <div className="bg-red-50 rounded-lg p-4">
@@ -354,7 +458,7 @@ export default function HostDetailPage() {
             <div>
               <h3 className="text-lg font-semibold mb-4">Detected Services</h3>
               <div className="space-y-4">
-                {host.services.map((service, idx) => (
+                {host.services?.map((service, idx) => (
                   <div key={idx} className="border rounded-lg p-4">
                     <div className="flex justify-between items-start mb-2">
                       <div>
@@ -388,7 +492,7 @@ export default function HostDetailPage() {
                 <p className="text-gray-500">No vulnerabilities detected</p>
               ) : (
                 <div className="space-y-4">
-                  {host.services.map((service) => 
+                  {host.services?.map((service) => 
                     service.vulnerabilities?.map((vuln, idx) => (
                       <div key={`${service.port}-${idx}`} className="border rounded-lg p-4">
                         <div className="flex justify-between items-start mb-2">
@@ -421,47 +525,43 @@ export default function HostDetailPage() {
               {host.summary ? (
                 <div className="space-y-6">
                   <div>
-                    <h3 className="text-lg font-semibold mb-2">Technical Summary</h3>
-                    <p className="text-gray-700">{host.summary.technical_summary}</p>
+                    <h3 className="text-lg font-semibold mb-2">Overview</h3>
+                    <p className="text-gray-700">{host.summary.overview}</p>
                   </div>
                   
                   <div>
-                    <h3 className="text-lg font-semibold mb-2">Business Impact</h3>
-                    <p className="text-gray-700">{host.summary.business_impact}</p>
+                    <h3 className="text-lg font-semibold mb-2">Security Posture</h3>
+                    <p className="text-gray-700">{host.summary.security_posture}</p>
                   </div>
                   
                   <div>
-                    <h3 className="text-lg font-semibold mb-2">Security Recommendations</h3>
+                    <h3 className="text-lg font-semibold mb-2">Recommendations</h3>
                     <ul className="list-disc list-inside space-y-1">
-                      {host.summary.security_recommendations.map((rec, idx) => (
+                      {host.summary.recommendations?.map((rec, idx) => (
                         <li key={idx} className="text-gray-700">{rec}</li>
-                      ))}
+                      )) || []}
                     </ul>
                   </div>
                   
                   <div>
-                    <h3 className="text-lg font-semibold mb-2">Risk Assessment</h3>
+                    <h3 className="text-lg font-semibold mb-2">Key Metrics</h3>
                     <div className="bg-gray-50 rounded-lg p-4">
-                      <p className="mb-2">
-                        <span className="font-medium">Overall Risk:</span>{' '}
-                        <span className={`px-2 py-1 rounded ${getRiskColorClass(host.summary.risk_assessment.overall_risk)}`}>
-                          {host.summary.risk_assessment.overall_risk.toUpperCase()}
-                        </span>
-                      </p>
-                      <div className="mb-2">
-                        <span className="font-medium">Key Concerns:</span>
-                        <ul className="list-disc list-inside mt-1">
-                          {host.summary.risk_assessment.key_concerns.map((concern, idx) => (
-                            <li key={idx} className="text-gray-600">{concern}</li>
-                          ))}
-                        </ul>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <div>
+                          <p className="text-sm font-medium text-gray-500">Risk Level</p>
+                          <span className={`inline-block mt-1 px-2 py-1 text-sm rounded ${getRiskColorClass(host.summary.key_metrics.risk_level)}`}>
+                            {host.summary.key_metrics.risk_level.toUpperCase()}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-500">Critical Issues</p>
+                          <p className="mt-1 text-2xl font-bold text-gray-900">{host.summary.key_metrics.critical_issues}</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-500">Total Vulnerabilities</p>
+                          <p className="mt-1 text-2xl font-bold text-gray-900">{host.summary.key_metrics.total_vulnerabilities}</p>
+                        </div>
                       </div>
-                      <p>
-                        <span className="font-medium">Mitigations Required:</span>{' '}
-                        <span className={host.summary.risk_assessment.mitigations_required ? 'text-red-600' : 'text-green-600'}>
-                          {host.summary.risk_assessment.mitigations_required ? 'Yes' : 'No'}
-                        </span>
-                      </p>
                     </div>
                   </div>
                 </div>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HostResponseSchema, ErrorResponseSchema } from '@/schemas';
-import { hostCache } from '@/lib/cache';
+import { persistentHostCache } from '@/lib/persistent-cache';
 
 export async function GET(
   request: NextRequest,
@@ -10,7 +10,7 @@ export async function GET(
     const { id } = params;
     
     // Get host from cache
-    const cached = hostCache.get(id);
+    const cached = persistentHostCache.get(id);
     
     if (!cached) {
       const errorResponse = ErrorResponseSchema.parse({

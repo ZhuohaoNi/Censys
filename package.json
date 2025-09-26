@@ -10,7 +10,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "cache:clear": "rm -rf .cache/"
   },
   "dependencies": {
     "next": "14.2.3",

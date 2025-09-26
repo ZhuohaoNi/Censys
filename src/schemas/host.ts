@@ -69,7 +69,7 @@ export const CertificateSchema = z.object({
   fingerprint_sha256: z.string(),
   subject: z.string(),
   issuer: z.string(),
-  self_signed: z.boolean(),
+  self_signed: z.boolean().optional(),
   subject_alt_names: z.array(z.string()).optional(),
   validity_period: z.object({
     not_before: z.string().optional(),
