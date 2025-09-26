@@ -1,5 +1,15 @@
 # Censys Data Summarization Agent
 
+<details open>
+<summary><strong>🎥 Demo (inline)</strong></summary>
+
+<!-- Inline demo video (MP4 recommended for broader GitHub playback support) -->
+<video src="./demo.mp4" controls width="640" preload="metadata">
+   Your browser does not support the video tag. Download the demo: <a href="./demo.mp4">demo.mp4</a>
+</video>
+
+</details>
+
 Quick Start
 1. Clone & install
    ```bash
