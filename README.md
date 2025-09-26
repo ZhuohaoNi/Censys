@@ -1,8 +1,5 @@
 # Censys Data Summarization Agent
 
-> TL;DR 
-> Ingest Censys host JSON -> engineer security features -> compute a deterministic weighted risk score (0–100) -> optionally generate an AI (gpt-5-mini) human-readable summary per host. File-based ephemeral cache.
-
 Quick Start
 1. Clone & install
    ```bash
@@ -24,38 +21,20 @@ Quick Start
    ```
 4. Open http://localhost:3000 and upload `docs/hosts_dataset.json`.
 
-Why this matters (Value Proposition)
-- Rapid host security triage: converts raw scan data into actionable, weighted risk signals.
-- Deterministic scoring + explainable weighting increases trust vs opaque LLM output.
-- AI summaries accelerate human consumption while retaining a fallback template path for resilience.
-- Zero external persistence: safer for sensitive test data (only transient file cache under `.cache/`).
 
-Key Features (Implemented)
+Key Features (Short Version)
 - Feature engineering: ports, CVEs (with severity & KEV flag), malware indicators, cert trust issues.
 - Weighted risk scoring (capped factors) -> risk level classification.
 - Per-host AI summary (gpt-5-mini) with automatic JSON schema validation & retry; fallback templated summary if model fails.
 - Export (JSON + Markdown) and simple system/health endpoints.
 - File-based TTL cache (default 1h) for idempotent summarization and analysis reuse.
 
-Assignment Coverage (Checklist)
+Assignment Coverage
 - Run Instructions: ✔ (Quick Start above)
 - Assumptions: ✔ (see Assumptions section)
 - Testing Instructions: ✔ (Manual Testing section)
 - Brief AI Techniques: ✔ (AI Techniques section)
 - Future Enhancements: ✔ (Concise list below)
-
-Risk Score Formula (Assumption)
-```
-score = min(
-  10 * criticalCVEs          (cap 40) +
-  (hasMalware ? 25 : 0)       +
-  (hasKEV ? min(8 * criticalCVEs, 24) : 0) +
-  2 * adminPortsExposed       (cap 8)  +
-  3 * selfSignedCerts         (cap 6)  +
-  (sshOnNonStandardPort ? 5 : 0),
-  100
-)
-```
 
 ---
 
